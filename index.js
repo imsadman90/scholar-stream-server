@@ -193,3 +193,49 @@ async function run() {
       const result = await usersCollection.deleteOne({ _id: new ObjectId(id) });
       res.json(result);
     });
+
+        /** -------------------- Scholarship Routes -------------------- **/
+    app.get("/scholarships", async (req, res) => {
+      const result = await scholarshipsCollection.find().toArray();
+      res.json(result);
+    });
+
+    app.get("/scholarships/top", async (req, res) => {
+      const limit = parseInt(req.query.limit) || 6;
+      const result = await scholarshipsCollection
+        .find()
+        .sort({ applicationFees: 1 })
+        .limit(limit)
+        .toArray();
+      res.json(result);
+    });
+
+    app.get("/scholarships/:id", async (req, res) => {
+      const id = req.params.id;
+      const result = await scholarshipsCollection.findOne({
+        _id: new ObjectId(id),
+      });
+      res.json(result);
+    });
+
+    app.post("/scholarships", async (req, res) => {
+      const result = await scholarshipsCollection.insertOne(req.body);
+      res.json({ insertedId: result.insertedId });
+    });
+
+    app.patch("/scholarships/:id", async (req, res) => {
+      const id = req.params.id;
+      const result = await scholarshipsCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: req.body }
+      );
+      res.json(result);
+    });
+
+    app.delete("/scholarships/:id", async (req, res) => {
+      const id = req.params.id;
+      const result = await scholarshipsCollection.deleteOne({
+        _id: new ObjectId(id),
+      });
+      res.json(result);
+    });
