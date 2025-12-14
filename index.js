@@ -121,3 +121,75 @@ async function run() {
         res.status(500).json({ error: "Failed to fetch user role" });
       }
     });
+
+        app.post("/users", async (req, res) => {
+      try {
+        const user = req.body;
+        const existingUser = await usersCollection.findOne({
+          email: user.email,
+        });
+        if (existingUser) {
+          const result = await usersCollection.updateOne(
+            { email: user.email },
+            {
+              $set: {
+                name: user.name,
+                photoURL: user.photoURL,
+                updatedAt: new Date().toISOString(),
+              },
+            }
+          );
+          return res.json({
+            message: "User updated",
+            acknowledged: result.acknowledged,
+          });
+        }
+        const newUser = {
+          ...user,
+          role: user.role || "student",
+          createdAt: new Date().toISOString(),
+        };
+        const result = await usersCollection.insertOne(newUser);
+        res.json({ message: "User created", insertedId: result.insertedId });
+      } catch (error) {
+        res.status(500).json({ error: "Failed to save user" });
+      }
+    });
+
+    app.patch("/users/:email", async (req, res) => {
+      try {
+        const email = req.params.email;
+        const { displayName, photoURL } = req.body;
+        const updateFields = { updatedAt: new Date().toISOString() };
+        if (displayName) updateFields.name = displayName;
+        if (photoURL) updateFields.photoURL = photoURL;
+
+        const result = await usersCollection.updateOne(
+          { email: email.toLowerCase() },
+          { $set: updateFields }
+        );
+        res.json({
+          success: true,
+          message: "Profile updated",
+          modifiedCount: result.modifiedCount,
+        });
+      } catch (error) {
+        res.status(500).json({ error: "Failed to update profile" });
+      }
+    });
+
+    app.patch("/users/:id/role", async (req, res) => {
+      const id = req.params.id;
+      const { role } = req.body;
+      const result = await usersCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: { role } }
+      );
+      res.json(result);
+    });
+
+    app.delete("/users/:id", async (req, res) => {
+      const id = req.params.id;
+      const result = await usersCollection.deleteOne({ _id: new ObjectId(id) });
+      res.json(result);
+    });
