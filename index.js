@@ -36,8 +36,7 @@ async function run() {
 
     console.log("MongoDB connected successfully!");
 
-
-        /** -------------------- Stripe Routes -------------------- **/
+    /** -------------------- Stripe Routes -------------------- **/
     app.post("/create-checkout-session", async (req, res) => {
       try {
         const {
@@ -85,8 +84,7 @@ async function run() {
       }
     });
 
-
-        /** -------------------- User Routes -------------------- **/
+    /** -------------------- User Routes -------------------- **/
     app.get("/users", async (req, res) => {
       try {
         const result = await usersCollection.find().toArray();
@@ -122,7 +120,7 @@ async function run() {
       }
     });
 
-        app.post("/users", async (req, res) => {
+    app.post("/users", async (req, res) => {
       try {
         const user = req.body;
         const existingUser = await usersCollection.findOne({
@@ -194,7 +192,7 @@ async function run() {
       res.json(result);
     });
 
-        /** -------------------- Scholarship Routes -------------------- **/
+    /** -------------------- Scholarship Routes -------------------- **/
     app.get("/scholarships", async (req, res) => {
       const result = await scholarshipsCollection.find().toArray();
       res.json(result);
@@ -240,8 +238,7 @@ async function run() {
       res.json(result);
     });
 
-
-        /** -------------------- Application Routes -------------------- **/
+    /** -------------------- Application Routes -------------------- **/
 
     app.get("/application", async (req, res) => {
       try {
@@ -265,7 +262,7 @@ async function run() {
       res.json({ insertedId: result.insertedId });
     });
 
-        app.get("/application/:id", async (req, res) => {
+    app.get("/application/:id", async (req, res) => {
       const id = req.params.id;
       const result = await applicationCollection.findOne({
         _id: new ObjectId(id),
@@ -302,7 +299,7 @@ async function run() {
       }
     });
 
-        app.get("/my-application", async (req, res) => {
+    app.get("/my-application", async (req, res) => {
       const result = await applicationCollection.find().toArray();
       res.send(result);
     });
@@ -361,3 +358,185 @@ async function run() {
       });
       res.json(result);
     });
+
+    /** -------------------- Dashboard Stats -------------------- **/
+    app.get("/application/dashboard/status", async (req, res) => {
+      try {
+        const { email } = req.query;
+        const user = await usersCollection.findOne({ email });
+        const isAdminOrModerator =
+          user && (user.role === "admin" || user.role === "moderator");
+
+        let query = {};
+        if (!isAdminOrModerator && email) query = { userEmail: email };
+
+        const totalApplications = await applicationCollection.countDocuments(
+          query
+        );
+        const stats = await applicationCollection
+          .aggregate([
+            { $match: query },
+            {
+              $group: {
+                _id: null,
+                total: { $sum: 1 },
+                pending: {
+                  $sum: {
+                    $cond: [{ $eq: ["$applicationStatus", "pending"] }, 1, 0],
+                  },
+                },
+                processing: {
+                  $sum: {
+                    $cond: [
+                      { $eq: ["$applicationStatus", "processing"] },
+                      1,
+                      0,
+                    ],
+                  },
+                },
+                completed: {
+                  $sum: {
+                    $cond: [{ $eq: ["$applicationStatus", "completed"] }, 1, 0],
+                  },
+                },
+                rejected: {
+                  $sum: {
+                    $cond: [{ $eq: ["$applicationStatus", "rejected"] }, 1, 0],
+                  },
+                },
+              },
+            },
+          ])
+          .toArray();
+
+        const result = stats[0] || {
+          total: 0,
+          pending: 0,
+          processing: 0,
+          completed: 0,
+          rejected: 0,
+        };
+        result.total = totalApplications;
+
+        res.json({
+          totalApplications: result.total,
+          pending: result.pending,
+          processing: result.processing,
+          completed: result.completed,
+          rejected: result.rejected,
+        });
+      } catch (error) {
+        res.status(500).json({ error: "Failed to fetch stats" });
+      }
+    });
+
+    /** -------------------- Review Routes -------------------- **/
+
+    app.get("/reviews", async (req, res) => {
+      const result = await reviewsCollection
+        .find({})
+        .sort({ reviewDate: -1 })
+        .toArray();
+      res.json(result);
+    });
+
+    app.get("/reviews/scholarship/:scholarshipId", async (req, res) => {
+      const scholarshipId = req.params.scholarshipId;
+      const result = await reviewsCollection
+        .find({ scholarshipId })
+        .sort({ reviewDate: -1 })
+        .toArray();
+      res.json(result);
+    });
+
+    app.get("/reviews/user/:email", async (req, res) => {
+      const email = req.params.email;
+      const result = await reviewsCollection
+        .find({ userEmail: email })
+        .toArray();
+      res.json(result);
+    });
+
+    app.patch("/application/:id/review", async (req, res) => {
+      const applicationId = req.params.id;
+      const { rating, comment } = req.body;
+
+      const application = await applicationCollection.findOne({
+        _id: new ObjectId(applicationId),
+      });
+      const scholarship = await scholarshipsCollection.findOne({
+        _id: new ObjectId(application.scholarshipId),
+      });
+
+      const userEmail = application.applicantEmail || application.userEmail;
+      const userName = application.applicantName || application.userName;
+      const userPhoto = application.applicantPhoto || application.userPhoto;
+
+      const existingReview = await reviewsCollection.findOne({
+        scholarshipId: application.scholarshipId,
+        userEmail,
+      });
+
+      const reviewData = {
+        scholarshipId: application.scholarshipId,
+        scholarshipName: scholarship.scholarshipName,
+        universityName: scholarship.universityName,
+        userEmail,
+        userName: userName || "Anonymous User",
+        userPhoto: userPhoto || null,
+        ratingPoint: parseInt(rating),
+        reviewComment: comment.trim(),
+        reviewDate: new Date(),
+      };
+
+      let result;
+      if (existingReview) {
+        result = await reviewsCollection.updateOne(
+          { _id: existingReview._id },
+          { $set: reviewData }
+        );
+      } else {
+        result = await reviewsCollection.insertOne(reviewData);
+      }
+
+      await applicationCollection.updateOne(
+        { _id: new ObjectId(applicationId) },
+        { $set: { reviewed: true } }
+      );
+
+      res.json({ success: true, result });
+    });
+
+    app.patch("/reviews/:id", async (req, res) => {
+      const id = req.params.id;
+      const { reviewComment, ratingPoint } = req.body;
+      const result = await reviewsCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: { reviewComment, ratingPoint, reviewDate: new Date() } }
+      );
+      res.send(result);
+    });
+
+    app.delete("/reviews/:id", async (req, res) => {
+      const id = req.params.id;
+      const result = await reviewsCollection.deleteOne({
+        _id: new ObjectId(id),
+      });
+      res.json(result);
+    });
+
+    console.log("All routes configured successfully!");
+  } catch (error) {
+    console.error("MongoDB connection failed:", error);
+  }
+}
+
+run().catch(console.dir);
+
+/** -------------------- Root & 404 -------------------- **/
+app.get("/", (req, res) => res.send("Scholar Stream Server is okay!"));
+app.use((req, res) => res.status(404).json({ error: "Route not found" }));
+
+app.listen(port, () => {
+  console.log(`Server running on http://localhost:${port}`);
+});
