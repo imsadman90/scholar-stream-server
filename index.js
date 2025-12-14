@@ -84,3 +84,40 @@ async function run() {
         res.status(500).json({ error: error.message });
       }
     });
+
+
+        /** -------------------- User Routes -------------------- **/
+    app.get("/users", async (req, res) => {
+      try {
+        const result = await usersCollection.find().toArray();
+        res.json(result);
+      } catch (error) {
+        res.status(500).json({ error: "Failed to fetch users" });
+      }
+    });
+
+    app.get("/users/:email", async (req, res) => {
+      try {
+        const email = req.params.email;
+        const user = await usersCollection.findOne({
+          email: email.toLowerCase(),
+        });
+        if (!user) return res.status(404).json({ message: "User not found" });
+        res.json(user);
+      } catch (error) {
+        res.status(500).json({ error: "Failed to fetch user" });
+      }
+    });
+
+    app.get("/users/role/:email", async (req, res) => {
+      try {
+        const email = req.params.email;
+        const user = await usersCollection.findOne(
+          { email: email.toLowerCase() },
+          { projection: { role: 1, name: 1, photoURL: 1 } }
+        );
+        res.json({ role: user?.role || "student" });
+      } catch (error) {
+        res.status(500).json({ error: "Failed to fetch user role" });
+      }
+    });
