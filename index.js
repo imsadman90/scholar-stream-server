@@ -25,3 +25,13 @@ const client = new MongoClient(process.env.MONGODB_URI, {
     deprecationErrors: true,
   },
 });
+
+async function run() {
+  try {
+    const db = client.db("scholar-stream-client");
+    const scholarshipsCollection = db.collection("scholarships");
+    const usersCollection = db.collection("users");
+    const applicationCollection = db.collection("application");
+    const reviewsCollection = db.collection("reviews");
+
+    console.log("MongoDB connected successfully!");
