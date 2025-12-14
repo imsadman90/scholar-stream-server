@@ -239,3 +239,28 @@ async function run() {
       });
       res.json(result);
     });
+
+
+        /** -------------------- Application Routes -------------------- **/
+
+    app.get("/application", async (req, res) => {
+      try {
+        const result = await applicationCollection.find().toArray();
+        res.json(result);
+      } catch (error) {
+        res.status(500).json({ error: "Failed to fetch applications" });
+      }
+    });
+
+    app.post("/application", async (req, res) => {
+      const application = {
+        ...req.body,
+        appliedAt: new Date().toISOString(),
+        applicationStatus: req.body.applicationStatus || "pending",
+        paymentStatus: "unpaid",
+        createdAt: new Date().toISOString(),
+      };
+
+      const result = await applicationCollection.insertOne(application);
+      res.json({ insertedId: result.insertedId });
+    });
