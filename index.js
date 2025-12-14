@@ -301,3 +301,63 @@ async function run() {
         res.status(500).json({ error: "Failed to fetch recent activities" });
       }
     });
+
+        app.get("/my-application", async (req, res) => {
+      const result = await applicationCollection.find().toArray();
+      res.send(result);
+    });
+
+    app.get("/manage-application/:email", async (req, res) => {
+      const result = await applicationCollection.find().toArray();
+      res.send(result);
+    });
+
+    app.patch("/application/:id", async (req, res) => {
+      const id = req.params.id;
+      const result = await applicationCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: req.body }
+      );
+      res.json(result);
+    });
+
+    app.patch("/application/:id/status", async (req, res) => {
+      const id = req.params.id;
+      const { status } = req.body;
+      const result = await applicationCollection.updateOne(
+        { _id: new ObjectId(id) },
+        {
+          $set: {
+            applicationStatus: status,
+            updatedAt: new Date().toISOString(),
+          },
+        }
+      );
+      res.json({ success: true, modifiedCount: result.modifiedCount });
+    });
+
+    app.patch("/application/:id/feedback", async (req, res) => {
+      const id = req.params.id;
+      const { feedback } = req.body;
+      const result = await applicationCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: { feedback, updatedAt: new Date().toISOString() } }
+      );
+      res.json({ success: true, result });
+    });
+
+    app.delete("/application/:id", async (req, res) => {
+      const id = req.params.id;
+      const result = await applicationCollection.deleteOne({
+        _id: new ObjectId(id),
+      });
+      res.json(result);
+    });
+
+    app.delete("/application/:id", async (req, res) => {
+      const id = req.params.id;
+      const result = await applicationCollection.deleteOne({
+        _id: new ObjectId(id),
+      });
+      res.json(result);
+    });
