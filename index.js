@@ -264,3 +264,40 @@ async function run() {
       const result = await applicationCollection.insertOne(application);
       res.json({ insertedId: result.insertedId });
     });
+
+        app.get("/application/:id", async (req, res) => {
+      const id = req.params.id;
+      const result = await applicationCollection.findOne({
+        _id: new ObjectId(id),
+      });
+      res.json(result);
+    });
+
+    app.get("/application/user/:email", async (req, res) => {
+      try {
+        const email = req.params.email;
+        const result = await applicationCollection
+          .find({ userEmail: email })
+          .toArray();
+        res.json(result);
+      } catch (error) {
+        res.status(500).json({ error: "Failed to fetch user applications" });
+      }
+    });
+
+    app.get("/application/recent", async (req, res) => {
+      try {
+        const { email, limit } = req.query;
+        const limitNum = limit ? Math.min(parseInt(limit), 100) : 5;
+
+        const result = await applicationCollection
+          .find({ userEmail: email })
+          .sort({ appliedAt: -1 })
+          .limit(limitNum)
+          .toArray();
+
+        res.json(result);
+      } catch (error) {
+        res.status(500).json({ error: "Failed to fetch recent activities" });
+      }
+    });
