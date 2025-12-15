@@ -38,6 +38,22 @@ const verifyToken = (req, res, next) => {
   });
 };
 
+const verifyAdmin = (req, res, next) => {
+  const user = req.user;
+  if (user.role !== "admin") {
+    return res.status(403).json({ message: "Forbidden: Admins only" });
+  }
+  next();
+};
+
+const verifyModerator = (req, res, next) => {
+  const user = req.user;
+  if (user.role !== "moderator") {
+    return res.status(403).json({ message: "Forbidden: Moderators only" });
+  }
+  next();
+};
+
 async function run() {
   try {
     const db = client.db("scholar-stream-client");
@@ -196,7 +212,7 @@ async function run() {
       }
     });
 
-    app.patch("/users/:id/role", verifyToken, async (req, res) => {
+    app.patch("/users/:id/role", verifyToken, verifyAdmin, async (req, res) => {
       const id = req.params.id;
       const { role } = req.body;
       const result = await usersCollection.updateOne(
@@ -206,7 +222,7 @@ async function run() {
       res.json(result);
     });
 
-    app.delete("/users/:id", async (req, res) => {
+    app.delete("/users/:id", verifyAdmin, async (req, res) => {
       const id = req.params.id;
       const result = await usersCollection.deleteOne({ _id: new ObjectId(id) });
       res.json(result);
@@ -236,12 +252,12 @@ async function run() {
       res.json(result);
     });
 
-    app.post("/scholarships", verifyToken, async (req, res) => {
+    app.post("/scholarships", verifyToken, verifyAdmin, async (req, res) => {
       const result = await scholarshipsCollection.insertOne(req.body);
       res.json({ insertedId: result.insertedId });
     });
 
-    app.patch("/scholarships/:id", verifyToken, async (req, res) => {
+    app.patch("/scholarships/:id", verifyToken, verifyAdmin, async (req, res) => {
       const id = req.params.id;
       const result = await scholarshipsCollection.updateOne(
         { _id: new ObjectId(id) },
@@ -250,7 +266,7 @@ async function run() {
       res.json(result);
     });
 
-    app.delete("/scholarships/:id", verifyToken, async (req, res) => {
+    app.delete("/scholarships/:id", verifyToken, verifyAdmin, async (req, res) => {
       const id = req.params.id;
       const result = await scholarshipsCollection.deleteOne({
         _id: new ObjectId(id),
@@ -324,7 +340,7 @@ async function run() {
       res.send(result);
     });
 
-    app.get("/manage-application/:email", verifyToken, async (req, res) => {
+    app.get("/manage-application/:email", verifyToken, verifyModerator, async (req, res) => {
       const result = await applicationCollection.find().toArray();
       res.send(result);
     });
@@ -338,7 +354,7 @@ async function run() {
       res.json(result);
     });
 
-    app.patch("/application/:id/status", verifyToken, async (req, res) => {
+    app.patch("/application/:id/status", verifyToken, verifyModerator, async (req, res) => {
       const id = req.params.id;
       const { status } = req.body;
       const result = await applicationCollection.updateOne(
@@ -353,7 +369,7 @@ async function run() {
       res.json({ success: true, modifiedCount: result.modifiedCount });
     });
 
-    app.patch("/application/:id/feedback", verifyToken, async (req, res) => {
+    app.patch("/application/:id/feedback", verifyToken, verifyModerator, async (req, res) => {
       const id = req.params.id;
       const { feedback } = req.body;
       const result = await applicationCollection.updateOne(
@@ -372,7 +388,7 @@ async function run() {
     });
 
     /** -------------------- Dashboard Stats -------------------- **/
-    app.get("/application/dashboard/status", verifyToken, async (req, res) => {
+    app.get("/application/dashboard/status", verifyToken, verifyAdmin, async (req, res) => {
       try {
         const { email } = req.query;
         const user = await usersCollection.findOne({ email });
@@ -453,10 +469,7 @@ async function run() {
       res.json(result);
     });
 
-    app.get(
-      "/reviews/scholarship/:scholarshipId",
-      verifyToken,
-      async (req, res) => {
+    app.get("/reviews/scholarship/:scholarshipId", verifyToken, async (req, res) => {
         const scholarshipId = req.params.scholarshipId;
         const result = await reviewsCollection
           .find({ scholarshipId })
