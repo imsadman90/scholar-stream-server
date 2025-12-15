@@ -9,7 +9,7 @@ const app = express();
 
 // CORS
 const corsOptions = {
-  origin: ["http://localhost:5173", "http://127.0.0.1:5173"],
+  origin: ["http://localhost:5173"],
   credentials: true,
   methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
@@ -25,6 +25,18 @@ const client = new MongoClient(process.env.MONGODB_URI, {
     deprecationErrors: true,
   },
 });
+
+const verifyToken = (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader)
+    return res.status(401).json({ message: "No token provided" });
+  const token = authHeader.split(" ")[1];
+  jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
+    if (err) return res.status(403).json({ message: "Invalid token" });
+    req.user = decoded;
+    next();
+  });
+};
 
 async function run() {
   try {
@@ -85,7 +97,7 @@ async function run() {
     });
 
     /** -------------------- User Routes -------------------- **/
-    app.get("/users", async (req, res) => {
+    app.get("/users", verifyToken, async (req, res) => {
       try {
         const result = await usersCollection.find().toArray();
         res.json(result);
@@ -94,7 +106,7 @@ async function run() {
       }
     });
 
-    app.get("/users/:email", async (req, res) => {
+    app.get("/users/:email", verifyToken, async (req, res) => {
       try {
         const email = req.params.email;
         const user = await usersCollection.findOne({
@@ -107,7 +119,7 @@ async function run() {
       }
     });
 
-    app.get("/users/role/:email", async (req, res) => {
+    app.get("/users/role/:email", verifyToken, async (req, res) => {
       try {
         const email = req.params.email;
         const user = await usersCollection.findOne(
@@ -123,12 +135,17 @@ async function run() {
     app.post("/users", async (req, res) => {
       try {
         const user = req.body;
-        const existingUser = await usersCollection.findOne({
-          email: user.email,
-        });
+        if (!user || !user.email) {
+          return res.status(400).json({ error: "Email is required" });
+        }
+        const email = user.email.toLowerCase();
+
+        // Check if user exists
+        const existingUser = await usersCollection.findOne({ email });
+
         if (existingUser) {
           const result = await usersCollection.updateOne(
-            { email: user.email },
+            { email },
             {
               $set: {
                 name: user.name,
@@ -142,19 +159,22 @@ async function run() {
             acknowledged: result.acknowledged,
           });
         }
+        // Create new user
         const newUser = {
           ...user,
+          email,
           role: user.role || "student",
           createdAt: new Date().toISOString(),
         };
         const result = await usersCollection.insertOne(newUser);
         res.json({ message: "User created", insertedId: result.insertedId });
       } catch (error) {
+        console.error("Failed to save user:", error);
         res.status(500).json({ error: "Failed to save user" });
       }
     });
 
-    app.patch("/users/:email", async (req, res) => {
+    app.patch("/users/:email", verifyToken, async (req, res) => {
       try {
         const email = req.params.email;
         const { displayName, photoURL } = req.body;
@@ -176,7 +196,7 @@ async function run() {
       }
     });
 
-    app.patch("/users/:id/role", async (req, res) => {
+    app.patch("/users/:id/role", verifyToken, async (req, res) => {
       const id = req.params.id;
       const { role } = req.body;
       const result = await usersCollection.updateOne(
@@ -216,12 +236,12 @@ async function run() {
       res.json(result);
     });
 
-    app.post("/scholarships", async (req, res) => {
+    app.post("/scholarships", verifyToken, async (req, res) => {
       const result = await scholarshipsCollection.insertOne(req.body);
       res.json({ insertedId: result.insertedId });
     });
 
-    app.patch("/scholarships/:id", async (req, res) => {
+    app.patch("/scholarships/:id", verifyToken, async (req, res) => {
       const id = req.params.id;
       const result = await scholarshipsCollection.updateOne(
         { _id: new ObjectId(id) },
@@ -230,7 +250,7 @@ async function run() {
       res.json(result);
     });
 
-    app.delete("/scholarships/:id", async (req, res) => {
+    app.delete("/scholarships/:id", verifyToken, async (req, res) => {
       const id = req.params.id;
       const result = await scholarshipsCollection.deleteOne({
         _id: new ObjectId(id),
@@ -240,7 +260,7 @@ async function run() {
 
     /** -------------------- Application Routes -------------------- **/
 
-    app.get("/application", async (req, res) => {
+    app.get("/application", verifyToken, async (req, res) => {
       try {
         const result = await applicationCollection.find().toArray();
         res.json(result);
@@ -249,12 +269,12 @@ async function run() {
       }
     });
 
-    app.post("/application", async (req, res) => {
+    app.post("/application", verifyToken, async (req, res) => {
       const application = {
         ...req.body,
         appliedAt: new Date().toISOString(),
         applicationStatus: req.body.applicationStatus || "pending",
-        paymentStatus: "unpaid",
+        paymentStatus: "unpaid", // last added thing
         createdAt: new Date().toISOString(),
       };
 
@@ -262,7 +282,7 @@ async function run() {
       res.json({ insertedId: result.insertedId });
     });
 
-    app.get("/application/:id", async (req, res) => {
+    app.get("/application/:id", verifyToken, async (req, res) => {
       const id = req.params.id;
       const result = await applicationCollection.findOne({
         _id: new ObjectId(id),
@@ -270,7 +290,7 @@ async function run() {
       res.json(result);
     });
 
-    app.get("/application/user/:email", async (req, res) => {
+    app.get("/application/user/:email", verifyToken, async (req, res) => {
       try {
         const email = req.params.email;
         const result = await applicationCollection
@@ -282,7 +302,7 @@ async function run() {
       }
     });
 
-    app.get("/application/recent", async (req, res) => {
+    app.get("/application/recent", verifyToken, async (req, res) => {
       try {
         const { email, limit } = req.query;
         const limitNum = limit ? Math.min(parseInt(limit), 100) : 5;
@@ -299,17 +319,17 @@ async function run() {
       }
     });
 
-    app.get("/my-application", async (req, res) => {
+    app.get("/my-application", verifyToken, async (req, res) => {
       const result = await applicationCollection.find().toArray();
       res.send(result);
     });
 
-    app.get("/manage-application/:email", async (req, res) => {
+    app.get("/manage-application/:email", verifyToken, async (req, res) => {
       const result = await applicationCollection.find().toArray();
       res.send(result);
     });
 
-    app.patch("/application/:id", async (req, res) => {
+    app.patch("/application/:id", verifyToken, async (req, res) => {
       const id = req.params.id;
       const result = await applicationCollection.updateOne(
         { _id: new ObjectId(id) },
@@ -318,7 +338,7 @@ async function run() {
       res.json(result);
     });
 
-    app.patch("/application/:id/status", async (req, res) => {
+    app.patch("/application/:id/status", verifyToken, async (req, res) => {
       const id = req.params.id;
       const { status } = req.body;
       const result = await applicationCollection.updateOne(
@@ -333,7 +353,7 @@ async function run() {
       res.json({ success: true, modifiedCount: result.modifiedCount });
     });
 
-    app.patch("/application/:id/feedback", async (req, res) => {
+    app.patch("/application/:id/feedback", verifyToken, async (req, res) => {
       const id = req.params.id;
       const { feedback } = req.body;
       const result = await applicationCollection.updateOne(
@@ -343,15 +363,7 @@ async function run() {
       res.json({ success: true, result });
     });
 
-    app.delete("/application/:id", async (req, res) => {
-      const id = req.params.id;
-      const result = await applicationCollection.deleteOne({
-        _id: new ObjectId(id),
-      });
-      res.json(result);
-    });
-
-    app.delete("/application/:id", async (req, res) => {
+    app.delete("/application/:id", verifyToken, async (req, res) => {
       const id = req.params.id;
       const result = await applicationCollection.deleteOne({
         _id: new ObjectId(id),
@@ -360,7 +372,7 @@ async function run() {
     });
 
     /** -------------------- Dashboard Stats -------------------- **/
-    app.get("/application/dashboard/status", async (req, res) => {
+    app.get("/application/dashboard/status", verifyToken, async (req, res) => {
       try {
         const { email } = req.query;
         const user = await usersCollection.findOne({ email });
@@ -394,6 +406,7 @@ async function run() {
                     ],
                   },
                 },
+
                 completed: {
                   $sum: {
                     $cond: [{ $eq: ["$applicationStatus", "completed"] }, 1, 0],
@@ -432,7 +445,7 @@ async function run() {
 
     /** -------------------- Review Routes -------------------- **/
 
-    app.get("/reviews", async (req, res) => {
+    app.get("/reviews", verifyToken, async (req, res) => {
       const result = await reviewsCollection
         .find({})
         .sort({ reviewDate: -1 })
@@ -440,16 +453,20 @@ async function run() {
       res.json(result);
     });
 
-    app.get("/reviews/scholarship/:scholarshipId", async (req, res) => {
-      const scholarshipId = req.params.scholarshipId;
-      const result = await reviewsCollection
-        .find({ scholarshipId })
-        .sort({ reviewDate: -1 })
-        .toArray();
-      res.json(result);
-    });
+    app.get(
+      "/reviews/scholarship/:scholarshipId",
+      verifyToken,
+      async (req, res) => {
+        const scholarshipId = req.params.scholarshipId;
+        const result = await reviewsCollection
+          .find({ scholarshipId })
+          .sort({ reviewDate: -1 })
+          .toArray();
+        res.json(result);
+      }
+    );
 
-    app.get("/reviews/user/:email", async (req, res) => {
+    app.get("/reviews/user/:email", verifyToken, async (req, res) => {
       const email = req.params.email;
       const result = await reviewsCollection
         .find({ userEmail: email })
@@ -457,7 +474,7 @@ async function run() {
       res.json(result);
     });
 
-    app.patch("/application/:id/review", async (req, res) => {
+    app.patch("/application/:id/review", verifyToken, async (req, res) => {
       const applicationId = req.params.id;
       const { rating, comment } = req.body;
 
@@ -507,7 +524,7 @@ async function run() {
       res.json({ success: true, result });
     });
 
-    app.patch("/reviews/:id", async (req, res) => {
+    app.patch("/reviews/:id", verifyToken, async (req, res) => {
       const id = req.params.id;
       const { reviewComment, ratingPoint } = req.body;
       const result = await reviewsCollection.updateOne(
@@ -517,7 +534,7 @@ async function run() {
       res.send(result);
     });
 
-    app.delete("/reviews/:id", async (req, res) => {
+    app.delete("/reviews/:id", verifyToken, async (req, res) => {
       const id = req.params.id;
       const result = await reviewsCollection.deleteOne({
         _id: new ObjectId(id),

@@ -1,3 +1,5 @@
-node_modules
+node_modules/
+serviceKey.json
 .env
 serviceKeyCoverter.js
+.vercel
