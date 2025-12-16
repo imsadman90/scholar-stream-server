@@ -11,7 +11,7 @@ const app = express();
 const corsOptions = {
   origin: ["http://localhost:5173"],
   credentials: true,
-  methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+  methods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
 };
 
@@ -26,32 +26,31 @@ const client = new MongoClient(process.env.MONGODB_URI, {
   },
 });
 
-const verifyToken = (req, res, next) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader)
-    return res.status(401).json({ message: "No token provided" });
-  const token = authHeader.split(" ")[1];
-  jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
-    if (err) return res.status(403).json({ message: "Invalid token" });
-    req.user = decoded;
+const admin = require("firebase-admin");
+
+admin.initializeApp({
+  credential: admin.credential.cert(
+    JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT)
+  ),
+});
+
+// ✅ Keep verifyToken outside (doesn't need database)
+const verifyToken = async (req, res, next) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    const token = authHeader.split(" ")[1];
+    const decodedUser = await admin.auth().verifyIdToken(token);
+
+    req.user = decodedUser;
     next();
-  });
-};
-
-const verifyAdmin = (req, res, next) => {
-  const user = req.user;
-  if (user.role !== "admin") {
-    return res.status(403).json({ message: "Forbidden: Admins only" });
+  } catch (error) {
+    console.error("Token error:", error);
+    res.status(401).json({ message: "Unauthorized" });
   }
-  next();
-};
-
-const verifyModerator = (req, res, next) => {
-  const user = req.user;
-  if (user.role !== "moderator") {
-    return res.status(403).json({ message: "Forbidden: Moderators only" });
-  }
-  next();
 };
 
 async function run() {
@@ -63,6 +62,41 @@ async function run() {
     const reviewsCollection = db.collection("reviews");
 
     console.log("MongoDB connected successfully!");
+
+    // ✅ Move middleware INSIDE run() so they can access collections
+    const verifyAdmin = async (req, res, next) => {
+      try {
+        const email = req.user.email;
+        const user = await usersCollection.findOne({ email });
+
+        if (!user || user.role !== "admin") {
+          return res.status(403).json({ message: "Forbidden: Admins only" });
+        }
+
+        next();
+      } catch (error) {
+        console.error("Admin verification error:", error);
+        res.status(500).json({ message: "Server error" });
+      }
+    };
+
+    const verifyModerator = async (req, res, next) => {
+      try {
+        const email = req.user.email;
+        const user = await usersCollection.findOne({ email });
+
+        if (!user || user.role !== "moderator") {
+          return res
+            .status(403)
+            .json({ message: "Forbidden: Moderators only" });
+        }
+
+        next();
+      } catch (error) {
+        console.error("Moderator verification error:", error);
+        res.status(500).json({ message: "Server error" });
+      }
+    };
 
     /** -------------------- Stripe Routes -------------------- **/
     app.post("/create-checkout-session", async (req, res) => {
@@ -213,19 +247,41 @@ async function run() {
     });
 
     app.patch("/users/:id/role", verifyToken, verifyAdmin, async (req, res) => {
-      const id = req.params.id;
-      const { role } = req.body;
-      const result = await usersCollection.updateOne(
-        { _id: new ObjectId(id) },
-        { $set: { role } }
-      );
-      res.json(result);
+      try {
+        const id = req.params.id;
+        const { role } = req.body;
+
+        if (!["student", "moderator", "admin"].includes(role)) {
+          return res.status(400).json({ error: "Invalid role" });
+        }
+
+        const result = await usersCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: { role, updatedAt: new Date().toISOString() } }
+        );
+        res.json({ success: true, modifiedCount: result.modifiedCount });
+      } catch (error) {
+        console.error("Role update error:", error);
+        res.status(500).json({ error: "Failed to update role" });
+      }
     });
 
-    app.delete("/users/:id", verifyAdmin, async (req, res) => {
-      const id = req.params.id;
-      const result = await usersCollection.deleteOne({ _id: new ObjectId(id) });
-      res.json(result);
+    app.delete("/users/:id", verifyToken, verifyAdmin, async (req, res) => {
+      try {
+        const id = req.params.id;
+        const result = await usersCollection.deleteOne({
+          _id: new ObjectId(id),
+        });
+
+        if (result.deletedCount === 0) {
+          return res.status(404).json({ error: "User not found" });
+        }
+
+        res.json({ success: true, deletedCount: result.deletedCount });
+      } catch (error) {
+        console.error("Delete user error:", error);
+        res.status(500).json({ error: "Failed to delete user" });
+      }
     });
 
     /** -------------------- Scholarship Routes -------------------- **/
@@ -257,22 +313,32 @@ async function run() {
       res.json({ insertedId: result.insertedId });
     });
 
-    app.patch("/scholarships/:id", verifyToken, verifyAdmin, async (req, res) => {
-      const id = req.params.id;
-      const result = await scholarshipsCollection.updateOne(
-        { _id: new ObjectId(id) },
-        { $set: req.body }
-      );
-      res.json(result);
-    });
+    app.patch(
+      "/scholarships/:id",
+      verifyToken,
+      verifyAdmin,
+      async (req, res) => {
+        const id = req.params.id;
+        const result = await scholarshipsCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: req.body }
+        );
+        res.json(result);
+      }
+    );
 
-    app.delete("/scholarships/:id", verifyToken, verifyAdmin, async (req, res) => {
-      const id = req.params.id;
-      const result = await scholarshipsCollection.deleteOne({
-        _id: new ObjectId(id),
-      });
-      res.json(result);
-    });
+    app.delete(
+      "/scholarships/:id",
+      verifyToken,
+      verifyAdmin,
+      async (req, res) => {
+        const id = req.params.id;
+        const result = await scholarshipsCollection.deleteOne({
+          _id: new ObjectId(id),
+        });
+        res.json(result);
+      }
+    );
 
     /** -------------------- Application Routes -------------------- **/
 
@@ -290,7 +356,7 @@ async function run() {
         ...req.body,
         appliedAt: new Date().toISOString(),
         applicationStatus: req.body.applicationStatus || "pending",
-        paymentStatus: "unpaid", // last added thing
+        paymentStatus: "unpaid",
         createdAt: new Date().toISOString(),
       };
 
@@ -340,10 +406,15 @@ async function run() {
       res.send(result);
     });
 
-    app.get("/manage-application/:email", verifyToken, verifyModerator, async (req, res) => {
-      const result = await applicationCollection.find().toArray();
-      res.send(result);
-    });
+    app.get(
+      "/manage-application/:email",
+      verifyToken,
+      verifyModerator,
+      async (req, res) => {
+        const result = await applicationCollection.find().toArray();
+        res.send(result);
+      }
+    );
 
     app.patch("/application/:id", verifyToken, async (req, res) => {
       const id = req.params.id;
@@ -354,30 +425,63 @@ async function run() {
       res.json(result);
     });
 
-    app.patch("/application/:id/status", verifyToken, verifyModerator, async (req, res) => {
-      const id = req.params.id;
-      const { status } = req.body;
-      const result = await applicationCollection.updateOne(
-        { _id: new ObjectId(id) },
-        {
-          $set: {
-            applicationStatus: status,
-            updatedAt: new Date().toISOString(),
-          },
-        }
-      );
-      res.json({ success: true, modifiedCount: result.modifiedCount });
-    });
+    app.patch(
+      "/application/:id/status",
+      verifyToken,
+      verifyModerator,
+      async (req, res) => {
+        const id = req.params.id;
+        const { status } = req.body;
+        const result = await applicationCollection.updateOne(
+          { _id: new ObjectId(id) },
+          {
+            $set: {
+              applicationStatus: status,
+              updatedAt: new Date().toISOString(),
+            },
+          }
+        );
+        res.json({ success: true, modifiedCount: result.modifiedCount });
+      }
+    );
 
-    app.patch("/application/:id/feedback", verifyToken, verifyModerator, async (req, res) => {
-      const id = req.params.id;
-      const { feedback } = req.body;
-      const result = await applicationCollection.updateOne(
-        { _id: new ObjectId(id) },
-        { $set: { feedback, updatedAt: new Date().toISOString() } }
-      );
-      res.json({ success: true, result });
-    });
+    app.patch(
+      "/application/:id/feedback",
+      verifyToken,
+      verifyModerator,
+      async (req, res) => {
+        const id = req.params.id;
+        const { feedback } = req.body;
+        const result = await applicationCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: { feedback, updatedAt: new Date().toISOString() } }
+        );
+        res.json({ success: true, result });
+      }
+    );
+
+    app.get(
+      "/application/check/:scholarshipId/:userEmail",
+      verifyToken,
+      async (req, res) => {
+        try {
+          const { scholarshipId, userEmail } = req.params;
+
+          const existingApplication = await applicationCollection.findOne({
+            scholarshipId: scholarshipId,
+            userEmail: userEmail.toLowerCase(),
+          });
+
+          res.json({
+            hasApplied: !!existingApplication,
+            application: existingApplication,
+          });
+        } catch (error) {
+          console.error("Check application error:", error);
+          res.status(500).json({ error: "Failed to check application status" });
+        }
+      }
+    );
 
     app.delete("/application/:id", verifyToken, async (req, res) => {
       const id = req.params.id;
@@ -388,7 +492,7 @@ async function run() {
     });
 
     /** -------------------- Dashboard Stats -------------------- **/
-    app.get("/application/dashboard/status", verifyToken, verifyAdmin, async (req, res) => {
+    app.get("/application/dashboard/status", verifyToken, async (req, res) => {
       try {
         const { email } = req.query;
         const user = await usersCollection.findOne({ email });
@@ -422,7 +526,6 @@ async function run() {
                     ],
                   },
                 },
-
                 completed: {
                   $sum: {
                     $cond: [{ $eq: ["$applicationStatus", "completed"] }, 1, 0],
@@ -469,7 +572,10 @@ async function run() {
       res.json(result);
     });
 
-    app.get("/reviews/scholarship/:scholarshipId", verifyToken, async (req, res) => {
+    app.get(
+      "/reviews/scholarship/:scholarshipId",
+      verifyToken,
+      async (req, res) => {
         const scholarshipId = req.params.scholarshipId;
         const result = await reviewsCollection
           .find({ scholarshipId })
