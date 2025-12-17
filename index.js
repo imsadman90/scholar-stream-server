@@ -34,7 +34,7 @@ admin.initializeApp({
   ),
 });
 
-// ✅ Keep verifyToken outside (doesn't need database)
+
 const verifyToken = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
@@ -63,7 +63,6 @@ async function run() {
 
     console.log("MongoDB connected successfully!");
 
-    // ✅ Move middleware INSIDE run() so they can access collections
     const verifyAdmin = async (req, res, next) => {
       try {
         const email = req.user.email;
