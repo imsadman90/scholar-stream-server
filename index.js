@@ -9,7 +9,7 @@ const app = express();
 
 // CORS
 const corsOptions = {
-  origin: ["http://localhost:5173"],
+  origin: ["http://localhost:5173", "https://scholar-stream-client.web.app"],
   credentials: true,
   methods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
@@ -33,7 +33,6 @@ admin.initializeApp({
     JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT)
   ),
 });
-
 
 const verifyToken = async (req, res, next) => {
   try {
